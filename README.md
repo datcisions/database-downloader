@@ -233,6 +233,7 @@ nano .env
 | `RCLONE_DEST_PATH` | Carpeta destino en Drive | `database-backups` |
 | `LOCAL_BACKUP_DIR` | Carpeta local temporal | `/var/backups/db-dumps` |
 | `LOCAL_RETENTION_DAYS` | Días que se guardan copias locales | `3` |
+| `EXCLUDE_TABLE_DATA` | Tablas exportadas sin filas, separadas por comas. Acepta patrones glob. | `audit_log,session_*` |
 | `NOTIFY_EMAIL` | Email para alertas de error (opcional) | `admin@example.com` |
 
 El archivo `.env` contiene contraseñas: asegúrate de que solo tu usuario pueda leerlo:

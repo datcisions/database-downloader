@@ -200,6 +200,17 @@ log "INFO" "Realizando pg_dump y comprimiendo → ${DUMP_FILENAME}"
 
 export PGPASSWORD="$DB_PASSWORD"
 
+# Construir flags --exclude-table-data a partir de la lista en .env
+declare -a exclude_data_flags=()
+if [[ -n "${EXCLUDE_TABLE_DATA:-}" ]]; then
+    IFS=',' read -ra _tables <<< "$EXCLUDE_TABLE_DATA"
+    for _table in "${_tables[@]}"; do
+        _table="${_table// /}"   # eliminar espacios accidentales
+        [[ -n "$_table" ]] && exclude_data_flags+=("--exclude-table-data=${_table}")
+    done
+    log "INFO" "Tablas exportadas sin datos: ${EXCLUDE_TABLE_DATA}"
+fi
+
 if ! pg_dump \
     --host="$DB_HOST" \
     --port="$DB_PORT" \
@@ -209,6 +220,7 @@ if ! pg_dump \
     --format=plain \
     --no-owner \
     --no-privileges \
+    "${exclude_data_flags[@]+"${exclude_data_flags[@]}"}" \
     2>>"$LOG_FILE" \
     | gzip --best > "$LOCAL_DUMP_PATH"; then
     notify_error "pg_dump falló para ${DB_NAME}. Revisa ${LOG_FILE}."
