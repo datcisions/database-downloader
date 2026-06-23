@@ -46,7 +46,6 @@ RCLONE_TARGET="${RCLONE_REMOTE}:${RCLONE_DEST_PATH}/${DUMP_FILENAME}"
 LOG_FILE="${LOCAL_BACKUP_DIR}/backup.log"
 
 LOCAL_RETENTION_DAYS="${LOCAL_RETENTION_DAYS:-3}"
-DRIVE_RETENTION_COUNT="${DRIVE_RETENTION_COUNT:-30}"
 
 # Permite que rclone encuentre su config cuando el script corre como root
 # o con un usuario distinto al que ejecutó `rclone config`.
@@ -95,24 +94,92 @@ cleanup_local() {
 }
 
 cleanup_drive() {
-    if [[ "${DRIVE_RETENTION_COUNT}" -le 0 ]]; then
-        return 0
-    fi
-    log "INFO" "Aplicando retención en Drive (máx ${DRIVE_RETENTION_COUNT} backups)..."
-    # Lista todos los backups en Drive ordenados por nombre (que incluye timestamp)
+    log "INFO" "Aplicando política de retención en Google Drive..."
+    log "INFO" "  · <= 5 días  : todos (diario)"
+    log "INFO" "  · 6-30 días  : 1 por semana"
+    log "INFO" "  · 31-365 días: 1 por mes"
+    log "INFO" "  · > 365 días : 1 por año"
+
+    # Lista más reciente primero; dentro de cada período conservamos el más reciente
     local files
     files=$(rclone lsf "${RCLONE_REMOTE}:${RCLONE_DEST_PATH}/" \
-        --include "${DB_NAME}_*.dump.gz" 2>/dev/null | sort)
-    local count
-    count=$(echo "$files" | grep -c '.' || true)
-    local to_delete=$(( count - DRIVE_RETENTION_COUNT ))
-    if [[ $to_delete -le 0 ]]; then
+        --include "${DB_NAME}_*.dump.gz" 2>/dev/null | sort -r)
+
+    if [[ -z "$files" ]]; then
+        log "INFO" "No hay backups en Drive, nada que limpiar."
         return 0
     fi
-    echo "$files" | head -n "$to_delete" | while read -r old_file; do
-        log "INFO" "Eliminando de Drive: ${old_file}"
-        rclone delete "${RCLONE_REMOTE}:${RCLONE_DEST_PATH}/${old_file}"
+
+    local now
+    now=$(date +%s)
+
+    # Registra el primer backup visto en cada semana/mes/año (el más reciente)
+    declare -A seen_weeks seen_months seen_years
+    local -a to_delete=()
+    local kept=0
+
+    while IFS= read -r filename; do
+        [[ -z "$filename" ]] && continue
+
+        # Extraer YYYYMMDD del nombre: DBNAME_YYYYMMDD_HHMMSS.dump.gz
+        local remainder="${filename#${DB_NAME}_}"
+        local datestr="${remainder:0:8}"
+
+        if ! [[ "$datestr" =~ ^[0-9]{8}$ ]]; then
+            log "WARN" "Fecha no reconocida en '${filename}', se omite."
+            continue
+        fi
+
+        local file_epoch
+        file_epoch=$(date -d "$datestr" +%s 2>/dev/null) || {
+            log "WARN" "Fecha inválida en '${filename}', se omite."
+            continue
+        }
+
+        local age_days=$(( (now - file_epoch) / 86400 ))
+        local keep=false
+
+        if [[ $age_days -le 5 ]]; then
+            keep=true
+        elif [[ $age_days -le 30 ]]; then
+            # %G%V = año ISO + semana ISO (evita problemas en cambio de año)
+            local key; key=$(date -d "$datestr" +%G%V)
+            if [[ -z "${seen_weeks[$key]:-}" ]]; then
+                seen_weeks[$key]=1
+                keep=true
+            fi
+        elif [[ $age_days -le 365 ]]; then
+            local key; key=$(date -d "$datestr" +%Y%m)
+            if [[ -z "${seen_months[$key]:-}" ]]; then
+                seen_months[$key]=1
+                keep=true
+            fi
+        else
+            local key; key=$(date -d "$datestr" +%Y)
+            if [[ -z "${seen_years[$key]:-}" ]]; then
+                seen_years[$key]=1
+                keep=true
+            fi
+        fi
+
+        if [[ "$keep" == true ]]; then
+            (( kept++ )) || true
+        else
+            to_delete+=("$filename")
+        fi
+    done <<< "$files"
+
+    if [[ ${#to_delete[@]} -eq 0 ]]; then
+        log "INFO" "Retención: ${kept} backup(s) conservado(s), ninguno eliminado."
+        return 0
+    fi
+
+    for f in "${to_delete[@]}"; do
+        log "INFO" "Eliminando de Drive: ${f}"
+        rclone delete "${RCLONE_REMOTE}:${RCLONE_DEST_PATH}/${f}" 2>>"$LOG_FILE"
     done
+
+    log "INFO" "Retención aplicada: ${kept} conservado(s), ${#to_delete[@]} eliminado(s)."
 }
 
 # ---------------------------------------------------------------------------

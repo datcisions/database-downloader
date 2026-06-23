@@ -233,7 +233,6 @@ nano .env
 | `RCLONE_DEST_PATH` | Carpeta destino en Drive | `database-backups` |
 | `LOCAL_BACKUP_DIR` | Carpeta local temporal | `/var/backups/db-dumps` |
 | `LOCAL_RETENTION_DAYS` | Días que se guardan copias locales | `3` |
-| `DRIVE_RETENTION_COUNT` | Máximo de backups en Drive (0 = sin límite) | `30` |
 | `NOTIFY_EMAIL` | Email para alertas de error (opcional) | `admin@example.com` |
 
 El archivo `.env` contiene contraseñas: asegúrate de que solo tu usuario pueda leerlo:
@@ -332,12 +331,44 @@ database-downloader/
 
 ## 9. Política de retención
 
-| Ubicación | Variable | Comportamiento |
-|---|---|---|
-| Local (`/var/backups/db-dumps/`) | `LOCAL_RETENTION_DAYS` | Elimina dumps con más de N días |
-| Google Drive | `DRIVE_RETENTION_COUNT` | Conserva solo los N backups más recientes |
+La limpieza se ejecuta automáticamente al final de cada backup exitoso.
 
-La limpieza se ejecuta automáticamente al final de cada backup. Los archivos más antiguos se eliminan primero.
+### Local (`/var/backups/db-dumps/`)
+
+Controlado por `LOCAL_RETENTION_DAYS` (defecto: 3 días). Se eliminan los dumps locales con más de N días de antigüedad — son solo copias temporales; la copia definitiva está en Drive.
+
+### Google Drive
+
+Política escalonada fija, diseñada para ejecución diaria:
+
+| Antigüedad del backup | Qué se conserva |
+|---|---|
+| Últimos 5 días | Todos (uno por día) |
+| Entre 6 y 30 días | El más reciente de cada semana |
+| Entre 31 y 365 días | El más reciente de cada mes |
+| Más de 365 días | El más reciente de cada año |
+
+**Ejemplo** con backups acumulados durante 2 años:
+
+```
+Hoy (23 jun 2026)
+├── 23 jun  ← día 0  ] diario
+├── 22 jun  ← día 1  ]
+├── 21 jun  ← día 2  ]
+├── 20 jun  ← día 3  ]
+├── 19 jun  ← día 4  ]
+├── 15 jun  ← semana anterior  ] semanal (últimas ~4 semanas)
+├── 8 jun   ← dos semanas atrás]
+├── 1 jun   ← tres semanas atrás]
+├── 1 may   ← hace un mes  ] mensual (últimos ~11 meses)
+├── 1 abr   ]
+│   ...
+├── 1 jul 2025 ]
+├── 1 ene 2025 ← hace más de 1 año ] anual
+└── 1 ene 2024 ]
+```
+
+Dentro de cada período se conserva el backup **más reciente**, de forma que siempre tienes el punto de restauración más actualizado de cada ventana.
 
 ---
 
