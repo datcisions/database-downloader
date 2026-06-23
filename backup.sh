@@ -18,6 +18,13 @@ fi
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 
+# .env.local sobreescribe .env cuando existe (no se versiona en git)
+ENV_LOCAL_FILE="${SCRIPT_DIR}/.env.local"
+if [[ -f "$ENV_LOCAL_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_LOCAL_FILE"
+fi
+
 # ---------------------------------------------------------------------------
 # Validar variables requeridas
 # ---------------------------------------------------------------------------
@@ -40,6 +47,12 @@ LOG_FILE="${LOCAL_BACKUP_DIR}/backup.log"
 
 LOCAL_RETENTION_DAYS="${LOCAL_RETENTION_DAYS:-3}"
 DRIVE_RETENTION_COUNT="${DRIVE_RETENTION_COUNT:-30}"
+
+# Permite que rclone encuentre su config cuando el script corre como root
+# o con un usuario distinto al que ejecutó `rclone config`.
+if [[ -n "${RCLONE_CONFIG:-}" ]]; then
+    export RCLONE_CONFIG
+fi
 
 # ---------------------------------------------------------------------------
 # Funciones auxiliares
